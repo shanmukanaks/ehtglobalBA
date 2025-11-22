@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  # PostgreSQL database (optional - can use SQLite instead)
+  postgres:
+    image: postgres:15-alpine
+    container_name: ewa-postgres
+    environment:
+      POSTGRES_DB: ewa_dev
+      POSTGRES_USER: ewa_user
+      POSTGRES_PASSWORD: ewa_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ewa_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # EWA Backend Server
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: ewa-server
+    ports:
+      - "4000:4000"
+    environment:
+      - NODE_ENV=development
+      - PORT=4000
+      - DATABASE_URL=postgresql://ewa_user:ewa_password@postgres:5432/ewa_dev
+    env_file:
+      - ./server/.env
+    volumes:
+      - ./server/uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
