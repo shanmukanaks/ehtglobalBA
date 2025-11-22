@@ -1,0 +1,8 @@
+{
+  "/page": "app/page.js",
+  "/dashboard/page": "app/dashboard/page.js",
+  "/admin-dashboard/page": "app/admin-dashboard/page.js",
+  "/api/plaid/income/route": "app/api/plaid/income/route.js",
+  "/lp-dashboard/page": "app/lp-dashboard/page.js",
+  "/api/basescan/token-info/route": "app/api/basescan/token-info/route.js"
+}

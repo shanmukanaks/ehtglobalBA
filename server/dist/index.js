@@ -1,0 +1,20 @@
+import express from "express";
+import cors from "cors";
+import morgan from "morgan";
+import { cfg } from "./config.js";
+import plaidRoutes from "./routes/plaid.js";
+import uploadRoutes from "./routes/uploads.js";
+import adminRoutes from "./routes/admin.js";
+import creditRoutes from "./routes/credit.js";
+const app = express();
+app.use(cors({ origin: cfg.corsOrigin, credentials: true }));
+app.use(express.json({ limit: "10mb" }));
+app.use(morgan("dev"));
+app.use("/api/plaid", plaidRoutes);
+app.use("/api/uploads", uploadRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api/credit", creditRoutes);
+app.get("/health", (_req, res) => res.json({ ok: true }));
+app.listen(cfg.port, () => {
+    console.log(`server listening on :${cfg.port}`);
+});
