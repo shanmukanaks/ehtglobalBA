@@ -5,10 +5,33 @@ import { prisma } from "../db.js";
 import { cfg } from "../config.js";
 import { ethers } from "ethers";
 import poolAbi from "./poolAbi.js";
+import { requireRole } from "../middleware/auth.js";
+
 const r = Router();
-const provider = new ethers.JsonRpcProvider(cfg.rpcUrl, cfg.chainId);
-const wallet = new ethers.Wallet(cfg.poolAdminPK, provider);
-const pool = new ethers.Contract(cfg.poolAddress, poolAbi, wallet);
+
+// middleware for admin routes
+const adminOnly = requireRole("admin");
+
+// lazy init blockchain connections, only create when env vars are present
+let provider = null;
+let wallet = null;
+let pool = null;
+
+function getPool() {
+    if (!pool && cfg.rpcUrl && cfg.poolAdminPK && cfg.poolAddress) {
+        provider = new ethers.JsonRpcProvider(cfg.rpcUrl, cfg.chainId);
+        wallet = new ethers.Wallet(cfg.poolAdminPK, provider);
+        pool = new ethers.Contract(cfg.poolAddress, poolAbi, wallet);
+    }
+    return pool;
+}
+
+function getProvider() {
+    if (!provider && cfg.rpcUrl) {
+        provider = new ethers.JsonRpcProvider(cfg.rpcUrl, cfg.chainId);
+    }
+    return provider;
+}
 /** User: create application (called when user connects wallet) */
 r.post("/applications/create", async (req, res) => {
     try {
@@ -110,7 +133,7 @@ r.post("/applications/create", async (req, res) => {
     }
 });
 /** Admin: get all applications */
-r.get("/applications", async (_req, res) => {
+r.get("/applications", adminOnly, async (_req, res) => {
     try {
         const applications = await prisma.application.findMany({
             include: {
@@ -199,7 +222,7 @@ r.get("/applications", async (_req, res) => {
     }
 });
 /** Admin: approve application and set on-chain credit */
-r.post("/applications/approve", async (req, res) => {
+r.post("/applications/approve", adminOnly, async (req, res) => {
     try {
         const body = z.object({
             wallet: z.string(),
@@ -240,7 +263,7 @@ r.post("/applications/approve", async (req, res) => {
         // on-chain call - normalize wallet address
         const normalizedWallet = body.wallet.toLowerCase();
         console.log(`Setting credit limit for wallet: ${normalizedWallet}, limit: ${body.approvedLimit}, dueDate: ${body.dueDate}`);
-        const tx = await pool.setCredit(normalizedWallet, body.approvedLimit, body.dueDate);
+        const tx = await getPool().setCredit(normalizedWallet, body.approvedLimit, body.dueDate);
         const receipt = await tx.wait();
         console.log(`Successfully set credit limit. Tx: ${receipt?.hash}`);
         res.json({ ok: true, applicationId: app.id, txHash: receipt?.hash });
@@ -250,7 +273,7 @@ r.post("/applications/approve", async (req, res) => {
     }
 });
 /** Admin: reject application */
-r.post("/applications/:id/reject", async (req, res) => {
+r.post("/applications/:id/reject", adminOnly, async (req, res) => {
     try {
         const { id } = req.params;
         // Get application with user info
@@ -271,7 +294,7 @@ r.post("/applications/:id/reject", async (req, res) => {
         try {
             const futureDate = Math.floor(Date.now() / 1000) + 86400; // 1 day from now
             console.log(`Attempting to reset credit limit for wallet: ${userWallet}`);
-            const tx = await pool.setCredit(userWallet, 0, futureDate);
+            const tx = await getPool().setCredit(userWallet, 0, futureDate);
             const receipt = await tx.wait();
             console.log(`Successfully reset credit limit to 0 for wallet ${userWallet} after rejection. Tx: ${receipt.hash}`);
         }
@@ -286,7 +309,7 @@ r.post("/applications/:id/reject", async (req, res) => {
     }
 });
 /** Admin: delete application */
-r.delete("/applications/:id", async (req, res) => {
+r.delete("/applications/:id", adminOnly, async (req, res) => {
     try {
         const { id } = req.params;
         // Get the application first to get the userId and wallet
@@ -312,7 +335,7 @@ r.delete("/applications/:id", async (req, res) => {
         try {
             const futureDate = Math.floor(Date.now() / 1000) + 86400; // 1 day from now
             console.log(`Attempting to reset credit limit for wallet: ${userWallet}`);
-            const tx = await pool.setCredit(userWallet, 0, futureDate);
+            const tx = await getPool().setCredit(userWallet, 0, futureDate);
             const receipt = await tx.wait();
             console.log(`Successfully reset credit limit to 0 for wallet ${userWallet} after deletion. Tx: ${receipt.hash}`);
         }
@@ -339,7 +362,7 @@ r.delete("/applications/:id", async (req, res) => {
     }
 });
 /** Admin: mark document verified/rejected */
-r.post("/documents/:id/status", async (req, res) => {
+r.post("/documents/:id/status", adminOnly, async (req, res) => {
     try {
         const { id } = req.params;
         const { status, notes } = req.body;
@@ -413,7 +436,7 @@ r.post("/repayment", async (req, res) => {
     }
 });
 /** Get transaction history (advancements, repayments, LP deposits/withdrawals) */
-r.get("/transaction-history", async (_req, res) => {
+r.get("/transaction-history", adminOnly, async (_req, res) => {
     try {
         console.log("Fetching transaction history...");
         // Get all transaction types
@@ -440,12 +463,12 @@ r.get("/transaction-history", async (_req, res) => {
                     // If principal is missing but we have a txHash, try to fetch it from the blockchain
                     if (principal === null && details.txHash) {
                         try {
-                            const receipt = await provider.getTransactionReceipt(details.txHash);
+                            const receipt = await getProvider().getTransactionReceipt(details.txHash);
                             if (receipt) {
                                 // Parse the Drawn event to get the amount
                                 const drawnEvent = receipt.logs.find((log) => {
                                     try {
-                                        const parsed = pool.interface.parseLog(log);
+                                        const parsed = getPool().interface.parseLog(log);
                                         return parsed?.name === "Drawn";
                                     }
                                     catch {
@@ -453,7 +476,7 @@ r.get("/transaction-history", async (_req, res) => {
                                     }
                                 });
                                 if (drawnEvent) {
-                                    const parsed = pool.interface.parseLog(drawnEvent);
+                                    const parsed = getPool().interface.parseLog(drawnEvent);
                                     if (parsed && parsed.args && parsed.args.length > 1) {
                                         // Drawn event: Drawn(address indexed user, uint256 amount)
                                         const amountWei = parsed.args[1]; // amount is the second argument
@@ -528,7 +551,7 @@ r.get("/transaction-history", async (_req, res) => {
     }
 });
 /** Clear transaction history */
-r.delete("/transaction-history", async (_req, res) => {
+r.delete("/transaction-history", adminOnly, async (_req, res) => {
     try {
         // Delete all transaction-related audit records
         await prisma.audit.deleteMany({
@@ -547,7 +570,7 @@ r.delete("/transaction-history", async (_req, res) => {
     }
 });
 /** Get total advancement fees - only count fees from repayments (fees are paid when user repays, not when they advance) */
-r.get("/advancement-fees", async (_req, res) => {
+r.get("/advancement-fees", adminOnly, async (_req, res) => {
     try {
         // Get repayments (fees are only paid on repayment, not advancement)
         const repayments = await prisma.audit.findMany({
@@ -650,7 +673,7 @@ r.post("/lp/deposit", async (req, res) => {
         let finalTxHash = txHash;
         if (!txHash) {
             // Owner must approve the pool to spend before calling deposit; we assume already done.
-            const tx = await pool.deposit(amount);
+            const tx = await getPool().deposit(amount);
             const rc = await tx.wait();
             finalTxHash = rc.hash;
         }
@@ -682,7 +705,7 @@ r.post("/lp/withdraw", async (req, res) => {
         // Otherwise, execute the withdraw transaction
         let finalTxHash = txHash;
         if (!txHash) {
-            const tx = await pool.withdraw(amount);
+            const tx = await getPool().withdraw(amount);
             const rc = await tx.wait();
             finalTxHash = rc.hash;
         }
@@ -708,13 +731,13 @@ r.post("/lp/withdraw", async (req, res) => {
     }
 });
 /** Admin: add LP to allowlist (V2 only) */
-r.post("/lp/add", async (req, res) => {
+r.post("/lp/add", adminOnly, async (req, res) => {
     try {
         const { lpAddress } = req.body;
         if (!ethers.isAddress(lpAddress)) {
             return res.status(400).json({ error: "Invalid address" });
         }
-        const tx = await pool.addLp(lpAddress);
+        const tx = await getPool().addLp(lpAddress);
         const rc = await tx.wait();
         res.json({ ok: true, lpAddress, txHash: rc?.hash });
     }
@@ -723,13 +746,13 @@ r.post("/lp/add", async (req, res) => {
     }
 });
 /** Admin: remove LP from allowlist (V2 only) */
-r.post("/lp/remove", async (req, res) => {
+r.post("/lp/remove", adminOnly, async (req, res) => {
     try {
         const { lpAddress } = req.body;
         if (!ethers.isAddress(lpAddress)) {
             return res.status(400).json({ error: "Invalid address" });
         }
-        const tx = await pool.removeLp(lpAddress);
+        const tx = await getPool().removeLp(lpAddress);
         const rc = await tx.wait();
         res.json({ ok: true, lpAddress, txHash: rc?.hash });
     }
@@ -744,7 +767,7 @@ r.get("/lp/balance/:address", async (req, res) => {
         if (!ethers.isAddress(address)) {
             return res.status(400).json({ error: "Invalid address" });
         }
-        const balance = await pool.lpBalance(address);
+        const balance = await getPool().lpBalance(address);
         res.json({ address, balance: balance.toString() });
     }
     catch (error) {
@@ -754,7 +777,7 @@ r.get("/lp/balance/:address", async (req, res) => {
 /** View: get total LP balance (V2 only) */
 r.get("/lp/total-balance", async (req, res) => {
     try {
-        const totalBalance = await pool.totalLpBalance();
+        const totalBalance = await getPool().totalLpBalance();
         res.json({ totalLpBalance: totalBalance.toString() });
     }
     catch (error) {
@@ -762,7 +785,7 @@ r.get("/lp/total-balance", async (req, res) => {
     }
 });
 /** View: get total amount currently lent out (sum of all user debts) */
-r.get("/total-debt", async (req, res) => {
+r.get("/total-debt", adminOnly, async (req, res) => {
     try {
         // Get all approved applications with wallets
         const approvedApps = await prisma.application.findMany({
@@ -778,7 +801,7 @@ r.get("/total-debt", async (req, res) => {
                 continue;
             seenWallets.add(wallet);
             try {
-                const line = await pool.lineOf(wallet);
+                const line = await getPool().lineOf(wallet);
                 const debt = line[1]; // debt is the second element
                 if (debt && debt > 0) {
                     totalDebt += BigInt(debt.toString());
