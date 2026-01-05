@@ -7,6 +7,7 @@ import { mainnet, sepolia, polygon, arbitrum, base } from "wagmi/chains";
 import { defineChain } from "viem";
 import { QueryClientProvider, QueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
+import { AuthProvider } from "./context/auth";
 
 // Define Base Sepolia testnet
 const baseSepolia = defineChain({
@@ -83,7 +84,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <WagmiProvider config={config}>
       <QueryClientProvider client={queryClient}>
         <RainbowKitProvider>
-          {children}
+          <AuthProvider>
+            {children}
+          </AuthProvider>
         </RainbowKitProvider>
       </QueryClientProvider>
     </WagmiProvider>

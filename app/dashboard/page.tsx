@@ -6,6 +6,7 @@ import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount, useEnsName, useReadContract, useWriteContract, useWaitForTransactionReceipt } from "wagmi";
 import { formatUnits, parseUnits } from "viem";
 import { defineChain } from "viem";
+import { ProtectedRoute } from "../components/ProtectedRoute";
 
 // Define Base Sepolia testnet
 const baseSepolia = defineChain({
@@ -1161,6 +1162,7 @@ export default function DashboardPage() {
   };
 
   return (
+    <ProtectedRoute>
     <div className="h-screen bg-white flex overflow-hidden">
       {/* Left Sidebar */}
       <div className="w-80 bg-white border-r border-gray-200 flex flex-col h-full">
@@ -2006,5 +2008,6 @@ export default function DashboardPage() {
         </div>
       )}
     </div>
+    </ProtectedRoute>
   );
 }

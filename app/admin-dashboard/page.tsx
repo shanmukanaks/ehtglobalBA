@@ -6,6 +6,8 @@ import { useReadContract } from "wagmi";
 import { formatUnits } from "viem";
 import { baseSepolia } from "wagmi/chains";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { ProtectedRoute } from "../components/ProtectedRoute";
+import { useAuth } from "../context/auth";
 
 // API base URL - adjust if needed
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
@@ -37,7 +39,8 @@ const timeOptions = [
 
 export default function AdminDashboardPage() {
   const router = useRouter();
-  
+  const { user } = useAuth();
+
   const [userEmail, setUserEmail] = useState<string>("");
   const [applications, setApplications] = useState<Array<{
     id: string;
@@ -247,9 +250,8 @@ export default function AdminDashboardPage() {
   }, []); // Empty dependency array - only run once on mount
 
   useEffect(() => {
-    const email = localStorage.getItem("user_email") || "";
-    setUserEmail(email);
-  }, []);
+    setUserEmail(user?.email || "");
+  }, [user]);
 
   // Helper function to truncate email
   const truncateEmail = (email: string, maxLength: number = 25) => {
@@ -509,6 +511,7 @@ export default function AdminDashboardPage() {
   };
 
   return (
+    <ProtectedRoute allowedRoles={["admin"]}>
     <div className="h-screen bg-white flex overflow-hidden">
       {/* Left Sidebar */}
       <div className="w-80 bg-white border-r border-gray-200 flex flex-col h-full">
@@ -1253,6 +1256,7 @@ export default function AdminDashboardPage() {
         </div>
       </div>
     </div>
+    </ProtectedRoute>
   );
 }
 
